@@ -1,39 +1,47 @@
+const mongoose = require('mongoose');
 const Event = require('../models/Event');
+const { getFallbackEvents, getFallbackEventById } = require('../utils/fallbackStore');
 
 // @desc    Get all events with filters (type: marathon/cycling, search, city)
 // @route   GET /api/events
 // @access  Public
 const getEvents = async (req, res) => {
   try {
-    const { type, search, city, difficulty } = req.query;
-    let query = {};
+    if (mongoose.connection.readyState === 1) {
+      const { type, search, city, difficulty } = req.query;
+      let query = {};
 
-    if (type && type !== 'all') {
-      query.type = type;
+      if (type && type !== 'all') {
+        query.type = type;
+      }
+
+      if (difficulty && difficulty !== 'all') {
+        query.difficulty = difficulty;
+      }
+
+      if (city) {
+        query.city = { $regex: city, $options: 'i' };
+      }
+
+      if (search) {
+        query.$or = [
+          { title: { $regex: search, $options: 'i' } },
+          { location: { $regex: search, $options: 'i' } },
+          { description: { $regex: search, $options: 'i' } },
+          { category: { $regex: search, $options: 'i' } },
+        ];
+      }
+
+      const events = await Event.find(query).sort({ date: 1 });
+      if (events && events.length > 0) {
+        return res.json(events);
+      }
     }
-
-    if (difficulty && difficulty !== 'all') {
-      query.difficulty = difficulty;
-    }
-
-    if (city) {
-      query.city = { $regex: city, $options: 'i' };
-    }
-
-    if (search) {
-      query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { location: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { category: { $regex: search, $options: 'i' } },
-      ];
-    }
-
-    const events = await Event.find(query).sort({ date: 1 });
-    res.json(events);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.warn('MongoDB getEvents warning:', error.message);
   }
+
+  return res.json(getFallbackEvents(req.query));
 };
 
 // @desc    Get event by ID
@@ -41,15 +49,21 @@ const getEvents = async (req, res) => {
 // @access  Public
 const getEventById = async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id).populate('registeredUsers', 'name avatar');
-    if (event) {
-      res.json(event);
-    } else {
-      res.status(404).json({ message: 'Event not found' });
+    if (mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(req.params.id)) {
+      const event = await Event.findById(req.params.id).populate('registeredUsers', 'name avatar');
+      if (event) {
+        return res.json(event);
+      }
     }
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.warn('MongoDB getEventById warning:', error.message);
   }
+
+  const fallback = getFallbackEventById(req.params.id);
+  if (fallback) {
+    return res.json(fallback);
+  }
+  return res.status(404).json({ message: 'Event not found' });
 };
 
 // @desc    Create/Plan a new sports event or marathon

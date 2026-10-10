@@ -1,45 +1,59 @@
+const mongoose = require('mongoose');
 const Product = require('../models/Product');
+const {
+  getFallbackProducts,
+  getFallbackProductById,
+  saveFallbackProduct,
+  deleteFallbackProduct,
+} = require('../utils/fallbackStore');
 
 // @desc    Get all products with search, category filter, sorting
 // @route   GET /api/products
 // @access  Public
 const getProducts = async (req, res) => {
   try {
-    const { category, search, minPrice, maxPrice, sort, featured } = req.query;
-    let query = {};
+    if (mongoose.connection.readyState === 1) {
+      const { category, search, minPrice, maxPrice, sort, featured } = req.query;
+      let query = {};
 
-    if (category && category !== 'All') {
-      query.category = category;
+      if (category && category !== 'All') {
+        query.category = category;
+      }
+
+      if (featured === 'true') {
+        query.isFeatured = true;
+      }
+
+      if (search) {
+        query.$or = [
+          { name: { $regex: search, $options: 'i' } },
+          { description: { $regex: search, $options: 'i' } },
+          { brand: { $regex: search, $options: 'i' } },
+        ];
+      }
+
+      if (minPrice || maxPrice) {
+        query.price = {};
+        if (minPrice) query.price.$gte = Number(minPrice);
+        if (maxPrice) query.price.$lte = Number(maxPrice);
+      }
+
+      let sortOption = { createdAt: -1 };
+      if (sort === 'price-asc') sortOption = { price: 1 };
+      if (sort === 'price-desc') sortOption = { price: -1 };
+      if (sort === 'rating') sortOption = { rating: -1 };
+
+      const products = await Product.find(query).sort(sortOption);
+      if (products && products.length > 0) {
+        return res.json(products);
+      }
     }
-
-    if (featured === 'true') {
-      query.isFeatured = true;
-    }
-
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { brand: { $regex: search, $options: 'i' } },
-      ];
-    }
-
-    if (minPrice || maxPrice) {
-      query.price = {};
-      if (minPrice) query.price.$gte = Number(minPrice);
-      if (maxPrice) query.price.$lte = Number(maxPrice);
-    }
-
-    let sortOption = { createdAt: -1 };
-    if (sort === 'price-asc') sortOption = { price: 1 };
-    if (sort === 'price-desc') sortOption = { price: -1 };
-    if (sort === 'rating') sortOption = { rating: -1 };
-
-    const products = await Product.find(query).sort(sortOption);
-    res.json(products);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.warn('MongoDB getProducts warning, using fallback catalog:', error.message);
   }
+
+  // Zero-downtime fallback for Render / offline DB
+  return res.json(getFallbackProducts(req.query));
 };
 
 // @desc    Get product by ID
@@ -47,15 +61,21 @@ const getProducts = async (req, res) => {
 // @access  Public
 const getProductById = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id);
-    if (product) {
-      res.json(product);
-    } else {
-      res.status(404).json({ message: 'Product not found' });
+    if (mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(req.params.id)) {
+      const product = await Product.findById(req.params.id);
+      if (product) {
+        return res.json(product);
+      }
     }
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.warn('MongoDB getProductById warning:', error.message);
   }
+
+  const fallback = getFallbackProductById(req.params.id);
+  if (fallback) {
+    return res.json(fallback);
+  }
+  return res.status(404).json({ message: 'Product not found' });
 };
 
 // @desc    Create a new product (admin or seller)

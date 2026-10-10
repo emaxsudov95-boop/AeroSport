@@ -45,15 +45,17 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Seeding endpoint
-app.post('/api/seed', async (req, res) => {
+// Seeding endpoint (supports both GET and POST)
+const handleSeed = async (req, res) => {
   try {
     await seedDB();
-    res.json({ message: 'Database seeded successfully with sports demo data!' });
+    res.json({ success: true, message: 'Database seeded successfully with sports demo data!' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+app.post('/api/seed', handleSeed);
+app.get('/api/seed', handleSeed);
 
 // Mount Routes
 app.use('/api/auth', require('./routes/authRoutes'));

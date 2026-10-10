@@ -1,37 +1,45 @@
+const mongoose = require('mongoose');
 const Trainer = require('../models/Trainer');
 const TrainerRequest = require('../models/TrainerRequest');
+const { getFallbackTrainers, getFallbackTrainerById } = require('../utils/fallbackStore');
 
 // @desc    Get all trainers with search & specialization filter
 // @route   GET /api/trainers
 // @access  Public
 const getTrainers = async (req, res) => {
   try {
-    const { sport, search, specialization } = req.query;
-    let query = {};
+    if (mongoose.connection.readyState === 1) {
+      const { sport, search, specialization } = req.query;
+      let query = {};
 
-    if (sport && sport !== 'all') {
-      query.sports = { $in: [new RegExp(sport, 'i')] };
+      if (sport && sport !== 'all') {
+        query.sports = { $in: [new RegExp(sport, 'i')] };
+      }
+
+      if (specialization && specialization !== 'all') {
+        query.specialization = { $regex: specialization, $options: 'i' };
+      }
+
+      if (search) {
+        query.$or = [
+          { name: { $regex: search, $options: 'i' } },
+          { title: { $regex: search, $options: 'i' } },
+          { specialization: { $regex: search, $options: 'i' } },
+          { bio: { $regex: search, $options: 'i' } },
+          { sports: { $in: [new RegExp(search, 'i')] } },
+        ];
+      }
+
+      const trainers = await Trainer.find(query).sort({ rating: -1 });
+      if (trainers && trainers.length > 0) {
+        return res.json(trainers);
+      }
     }
-
-    if (specialization && specialization !== 'all') {
-      query.specialization = { $regex: specialization, $options: 'i' };
-    }
-
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { title: { $regex: search, $options: 'i' } },
-        { specialization: { $regex: search, $options: 'i' } },
-        { bio: { $regex: search, $options: 'i' } },
-        { sports: { $in: [new RegExp(search, 'i')] } },
-      ];
-    }
-
-    const trainers = await Trainer.find(query).sort({ rating: -1 });
-    res.json(trainers);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.warn('MongoDB getTrainers warning:', error.message);
   }
+
+  return res.json(getFallbackTrainers(req.query));
 };
 
 // @desc    Get trainer by ID
@@ -39,14 +47,21 @@ const getTrainers = async (req, res) => {
 // @access  Public
 const getTrainerById = async (req, res) => {
   try {
-    const trainer = await Trainer.findById(req.params.id);
-    if (!trainer) {
-      return res.status(404).json({ message: 'Trainer not found' });
+    if (mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(req.params.id)) {
+      const trainer = await Trainer.findById(req.params.id);
+      if (trainer) {
+        return res.json(trainer);
+      }
     }
-    res.json(trainer);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.warn('MongoDB getTrainerById warning:', error.message);
   }
+
+  const fallback = getFallbackTrainerById(req.params.id);
+  if (fallback) {
+    return res.json(fallback);
+  }
+  return res.status(404).json({ message: 'Trainer not found' });
 };
 
 // @desc    Send a message / training request to a trainer

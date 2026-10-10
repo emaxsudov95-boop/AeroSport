@@ -1181,8 +1181,14 @@ const seedDB = async () => {
   }
 };
 
-// Export seed function for server endpoint or CLI execution
+// Export seed function and raw data for fallback store
 module.exports = seedDB;
+module.exports.seedDB = seedDB;
+module.exports.products = products;
+module.exports.events = events;
+module.exports.facilities = facilities;
+module.exports.trainers = trainers;
+module.exports.users = users;
 
 if (require.main === module) {
   seedDB().then(() => {

@@ -1,36 +1,44 @@
+const mongoose = require('mongoose');
 const Facility = require('../models/Facility');
 const Booking = require('../models/Booking');
+const { getFallbackFacilities, getFallbackFacilityById } = require('../utils/fallbackStore');
 
 // @desc    Get all sports facilities (fields, gyms, halls)
 // @route   GET /api/bookings/facilities
 // @access  Public
 const getFacilities = async (req, res) => {
   try {
-    const { type, search, city } = req.query;
-    let query = {};
+    if (mongoose.connection.readyState === 1) {
+      const { type, search, city } = req.query;
+      let query = {};
 
-    if (type && type !== 'all') {
-      query.type = type;
+      if (type && type !== 'all') {
+        query.type = type;
+      }
+
+      if (city) {
+        query.city = { $regex: city, $options: 'i' };
+      }
+
+      if (search) {
+        query.$or = [
+          { name: { $regex: search, $options: 'i' } },
+          { address: { $regex: search, $options: 'i' } },
+          { description: { $regex: search, $options: 'i' } },
+          { surface: { $regex: search, $options: 'i' } },
+        ];
+      }
+
+      const facilities = await Facility.find(query).sort({ rating: -1 });
+      if (facilities && facilities.length > 0) {
+        return res.json(facilities);
+      }
     }
-
-    if (city) {
-      query.city = { $regex: city, $options: 'i' };
-    }
-
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { address: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { surface: { $regex: search, $options: 'i' } },
-      ];
-    }
-
-    const facilities = await Facility.find(query).sort({ rating: -1 });
-    res.json(facilities);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.warn('MongoDB getFacilities warning:', error.message);
   }
+
+  return res.json(getFallbackFacilities(req.query));
 };
 
 // @desc    Get single facility by ID
@@ -38,14 +46,21 @@ const getFacilities = async (req, res) => {
 // @access  Public
 const getFacilityById = async (req, res) => {
   try {
-    const facility = await Facility.findById(req.params.id);
-    if (!facility) {
-      return res.status(404).json({ message: 'Facility not found' });
+    if (mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(req.params.id)) {
+      const facility = await Facility.findById(req.params.id);
+      if (facility) {
+        return res.json(facility);
+      }
     }
-    res.json(facility);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.warn('MongoDB getFacilityById warning:', error.message);
   }
+
+  const fallback = getFallbackFacilityById(req.params.id);
+  if (fallback) {
+    return res.json(fallback);
+  }
+  return res.status(404).json({ message: 'Facility not found' });
 };
 
 // @desc    Get booked slots for a facility on a specific date
